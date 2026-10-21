@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SubTrack</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --text:#1c2033; --muted:#6b7190; --brand:#5b4bdb; --line:#e6e8f0; --warn:#c2410c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14151f; --card:#1d1f2e; --text:#eceefb; --muted:#9aa0c0; --line:#2c2f45; --warn:#fb923c; } }
+  * { box-sizing:border-box } body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:900px; margin:0 auto; padding:20px 16px 60px; }
+  header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+  h1 { margin:0; font-size:22px; color:var(--brand) } h2 { font-size:16px; margin:0 0 12px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
+  .stat b { display:block; font-size:24px } .stat span { color:var(--muted); font-size:13px }
+  input,select,button { font:inherit; padding:9px 12px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
+  button { background:var(--brand); color:#fff; border:0; cursor:pointer } button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line) }
+  form { display:flex; flex-direction:column; gap:10px; max-width:320px }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+  .scroll { overflow-x:auto } table { width:100%; border-collapse:collapse; font-size:14px }
+  th,td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); white-space:nowrap } th { color:var(--muted); font-weight:500 }
+  .alert { color:var(--warn); padding:6px 0 } .muted { color:var(--muted); font-size:13px } .hidden { display:none }
+  .pill { background:var(--line); border-radius:99px; padding:2px 9px; font-size:12px }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>SubTrack</h1><div id="who" class="row hidden"><span id="name" class="muted"></span><button class="ghost" id="logout">Log out</button></div></header>
+
+  <section id="auth" class="card">
+    <h2 id="authTitle">Log in</h2>
+    <form id="authForm">
+      <input id="aname" placeholder="Name" class="hidden">
+      <input id="aemail" type="email" placeholder="Email" required>
+      <input id="apass" type="password" placeholder="Password" required>
+      <button>Continue</button>
+      <span class="muted"><a href="#" id="toggle">Need an account? Register</a></span>
+      <span id="autherr" class="alert"></span>
+    </form>
+  </section>
+
+  <section id="app" class="hidden">
+    <div class="card">
+      <h2>Upload bank statement (CSV)</h2>
+      <div class="row"><input type="file" id="file" accept=".csv"><button id="up">Upload</button><button class="ghost" id="clear">Clear my data</button></div>
+      <p id="upmsg" class="muted"></p>
+    </div>
+
+    <div class="grid">
+      <div class="card stat"><b id="monthly">–</b><span>Per month on subscriptions</span></div>
+      <div class="card stat"><b id="yearly">–</b><span>Per year</span></div>
+      <div class="card stat"><b id="count">–</b><span>Subscriptions detected</span></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><h2>Upcoming payments</h2>
+        <select id="days"><option value="7">Next 7 days</option><option value="15">Next 15 days</option><option value="30">Next 30 days</option></select></div>
+      <div id="alerts" class="muted">Nothing due.</div>
+    </div>
+
+    <div class="card"><h2>Subscriptions</h2><div class="scroll"><table><thead><tr><th>Merchant</th><th>Amount</th><th>Frequency</th><th>Last paid</th><th>Next due</th></tr></thead><tbody id="subs"></tbody></table></div></div>
+    <div class="card"><h2>Transactions</h2><div class="scroll"><table><thead><tr><th>Date</th><th>Description (masked)</th><th>Merchant</th><th>Amount</th></tr></thead><tbody id="txns"></tbody></table></div></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let token = sessionStorage.getItem('token'), mode = 'login';
+const inr = (n) => '₹' + Number(n).toLocaleString('en-IN');
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({}, opts.headers, token ? { Authorization: 'Bearer ' + token } : {});
+  const r = await fetch('/api' + path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 401 && token) { logout(); }
+  if (!r.ok) throw new Error(data.message || 'Request failed');
+  return data;
+}
+function show() {
+  $('auth').classList.toggle('hidden', !!token);
+  $('app').classList.toggle('hidden', !token);
+  $('who').classList.toggle('hidden', !token);
+  $('name').textContent = sessionStorage.getItem('name') || '';
+  if (token) refresh();
+}
+function logout() { token = null; sessionStorage.clear(); show(); }
+$('logout').onclick = logout;
+
+$('toggle').onclick = (e) => {
+  e.preventDefault(); mode = mode === 'login' ? 'register' : 'login';
+  $('authTitle').textContent = mode === 'login' ? 'Log in' : 'Register';
+  $('aname').classList.toggle('hidden', mode === 'login');
+  $('toggle').textContent = mode === 'login' ? 'Need an account? Register' : 'Have an account? Log in';
+};
+$('authForm').onsubmit = async (e) => {
+  e.preventDefault(); $('autherr').textContent = '';
+  const body = { name: $('aname').value, email: $('aemail').value, password: $('apass').value };
+  try {
+    if (mode === 'register') await api('/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await api('/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    token = d.token; sessionStorage.setItem('token', token); sessionStorage.setItem('name', d.name); show();
+  } catch (err) { $('autherr').textContent = err.message; }
+};
+
+$('up').onclick = async () => {
+  const f = $('file').files[0];
+  if (!f) { $('upmsg').textContent = 'Choose a CSV first.'; return; }
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const d = await api('/upload', { method: 'POST', body: fd });
+    $('upmsg').textContent = `Added ${d.added}, skipped ${d.skipped} duplicates, ${d.invalid} invalid rows. ${d.subscriptionsDetected} subscriptions found.`;
+    refresh();
+  } catch (err) { $('upmsg').textContent = err.message; }
+};
+$('clear').onclick = async () => { if (confirm('Delete all your uploaded data?')) { await api('/transactions', { method: 'DELETE' }); refresh(); } };
+$('days').onchange = refreshAlerts;
+
+async function refreshAlerts() {
+  const a = await api('/alerts?days=' + $('days').value);
+  $('alerts').innerHTML = a.length ? a.map((x) => `<div class="alert">${esc(x.message)} on ${esc(x.due_date)}</div>`).join('') : 'Nothing due in this window.';
+}
+async function refresh() {
+  try {
+    const [s, t] = await Promise.all([api('/subscriptions'), api('/transactions')]);
+    $('monthly').textContent = inr(s.monthlyTotal); $('yearly').textContent = inr(s.yearlyTotal); $('count').textContent = s.subscriptions.length;
+    $('subs').innerHTML = s.subscriptions.map((x) => `<tr><td>${esc(x.merchant)}</td><td>${inr(x.amount)}</td><td><span class="pill">${esc(x.frequency)}</span></td><td>${esc(x.last_paid)}</td><td>${esc(x.next_due)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Upload a statement to detect subscriptions.</td></tr>';
+    $('txns').innerHTML = t.map((x) => `<tr><td>${esc(x.date)}</td><td>${esc(x.raw_description)}</td><td>${esc(x.merchant_clean)}</td><td>${x.type === 'credit' ? '+' : '−'}${inr(x.amount)}</td></tr>`).join('');
+    refreshAlerts();
+  } catch (e) {}
+}
+show();
+</script>
+</body>
+</html>

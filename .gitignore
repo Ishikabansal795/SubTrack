@@ -1,0 +1,22 @@
+node_modules
+.env
+*.db
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Local databases and logs
+*.db
+*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
